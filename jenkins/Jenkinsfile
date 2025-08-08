@@ -1,0 +1,116 @@
+// Jenkinsfile 
+
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_IMAGE = 'sentiment-api'
+        DOCKER_TAG = 'latest'
+    }
+    
+    stages {
+        
+        stage('Setup Environment') {
+            steps {
+                echo 'Fase 0: Preparazione ambiente e pulizia selettiva'
+                script {
+                    sh 'docker-compose -f docker-compose-app.yml down || true'
+                    sh 'docker container prune -f'
+                    sh 'docker image prune -a -f'
+                    sh 'docker builder prune -f'
+                }
+            }
+        }
+        
+        stage('Download Model') {
+            steps {
+                echo 'Fase 0.1: Download del modello con script Python'
+                script {
+                    sh 'mkdir -p src'
+                    sh "python3 scripts/download_model.py src/sentiment_analysis_model.pkl"
+                }
+            }
+        }
+        
+        stage('Verify Model') {
+            steps {
+                echo "Verifica l'esistenza e il formato del modello"
+                sh 'ls -lh src/'
+                sh 'test -f src/sentiment_analysis_model.pkl'
+                sh 'file src/sentiment_analysis_model.pkl'
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                echo 'Fase 1: Costruzione dell\'immagine Docker'
+                sh "docker build -t ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} ."
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                echo 'Fase 2: Esecuzione dei test sull\'immagine buildata'
+                script {
+                    sh 'docker network create monitor-network || true'
+                    sh "docker run -d --name test-api-container --network=monitor-network ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}"
+                    
+                    sh '''
+                        echo "Waiting for API container to be ready..."
+                        for i in $(seq 1 30); do
+                            if docker logs test-api-container 2>&1 | grep -q "Uvicorn running on"; then
+                                echo "API container is ready!"
+                                break
+                            else
+                                echo "Attempt $i: API not ready yet."
+                                if [ $i -eq 30 ]; then
+                                    echo "API failed to start in time"
+                                    docker logs test-api-container
+                                    exit 1
+                                fi
+                                sleep 2
+                            fi
+                        done
+                    '''
+                    
+                    echo 'Running API and Model tests...'
+                    sh "docker run --rm --network=monitor-network ${env.DOCKER_IMAGE}:${env.DOCKER_TAG} python -m unittest discover -v -s tests"
+                }
+            }
+            post {
+                always {
+                    echo 'Pulizia del container di test'
+                    sh 'docker logs test-api-container || true'
+                    sh 'docker stop test-api-container || true'
+                    sh 'docker rm test-api-container || true'
+                }
+            }
+        }
+        
+        stage('Deploy Full Stack') {
+            steps {
+                echo 'Fase 3: Deploy dell\'intero stack (API, Prometheus, Grafana, cAdvisor)'
+                script {
+                    // Questo comando ora costruirà sia l'immagine dell'API sia la nuova immagine di Prometheus.
+                    sh 'docker-compose -f docker-compose-app.yml up -d --build'
+                    
+                    sh 'echo "✅ Stack di monitoraggio e API deployato con successo!"'
+                    sh 'echo "Attendi circa 30 secondi e poi controlla Grafana su http://<tuo-ip-server>:3000"'
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo '🧹 Pulizia finale selettiva'
+            sh 'docker container prune -f'
+        }
+        success {
+            echo '✅ Pipeline completata con successo!'
+        }
+        failure {
+            echo '❌ Pipeline fallita. Controllare i log per i dettagli.'
+        }
+    }
+}

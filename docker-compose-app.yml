@@ -1,0 +1,64 @@
+# docker-compose-app.yml
+
+
+services:
+  # Servizio dell'API di Sentiment Analysis
+  sentiment-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sentiment-api-prod
+    ports:
+      - "8081:8000"
+    networks:
+      - monitor-network
+    restart: always
+
+  # Servizio di Prometheus (costruito con configurazione inclusa)
+  prometheus:
+    build:
+      context: ./monitoring
+      dockerfile: Dockerfile.prometheus
+    container_name: prometheus-server
+    ports:
+      - "9090:9090"
+    networks:
+      - monitor-network
+    restart: always
+
+  # Servizio di Grafana (con provisioning automatico)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-server
+    ports:
+      - "3000:3000"
+    volumes:
+      # Monta la cartella con il file datasource.yml
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      # Monta la cartella che contiene sia dashboard.yml (le istruzioni) sia dashboard.json (la dashboard)
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - monitor-network
+    depends_on:
+      - prometheus
+    restart: always
+
+  # Servizio cAdvisor per le metriche di sistema (CPU/Memoria)
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8082:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitor-network
+    restart: always
+    
+# Rete condivisa per la comunicazione tra i container
+networks:
+  monitor-network:
+    driver: bridge

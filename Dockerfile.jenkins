@@ -1,0 +1,47 @@
+FROM jenkins/jenkins:lts-jdk17
+
+USER root
+
+# Installa strumenti di base e dipendenze
+RUN apt-get update && apt-get install -y \
+    file \
+    curl \
+    gnupg \
+    apt-transport-https \
+    lsb-release \
+    python3 \
+    python3-pip \
+    python3-requests \
+    && rm -rf /var/lib/apt/lists/*
+
+# INSTALLAZIONE DOCKER CLI
+# Configura chiave GPG Docker
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Aggiunge il repository Docker
+RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
+
+# Installa la Docker CLI
+RUN apt-get update && apt-get install -y docker-ce-cli
+
+# INSTALLAZIONE DOCKER COMPOSE 
+# Scarica la versione stabile di Docker Compose
+RUN curl -L "https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+# Rende il file eseguibile
+RUN chmod +x /usr/local/bin/docker-compose
+
+# CONFIGURAZIONE UTENTE JENKINS 
+# 1. Crea il gruppo 'docker' se non esiste.
+RUN groupadd docker || true
+
+# 2. Aggiuno l'utente 'jenkins' al gruppo 'docker' per dargli i permessi.
+RUN usermod -aG docker jenkins
+
+# Verifica che tutto sia installato
+RUN docker --version && docker-compose --version
+
+# Torna all'utente jenkins per l'esecuzione
+USER jenkins
